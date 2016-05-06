@@ -108,9 +108,11 @@ class Line(object):
         pixel_signals = np.split(self.signal_array, self.n_pixels, axis=1)
 
         # Iterate over pixels and return tFP and shift arrays.
+        fit = []
         for i, pixel_signal in enumerate(pixel_signals):
 
-            p = pixel.Pixel(pixel_signal, self.params)
-            (self.tfp[i], self.shift[i], self.inst_freq[:, i]) = p.analyze()
+            p = pixel.Pixel(pixel_signal, self.params, fit_init=fit)
+            #(self.tfp[i], self.shift[i], self.inst_freq[:, i]) = p.analyze()
+            (self.tfp[i], self.shift[i], self.inst_freq[:, i], fit) = p.analyze()
 
         return (self.tfp, self.shift, self.inst_freq)

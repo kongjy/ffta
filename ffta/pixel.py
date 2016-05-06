@@ -20,7 +20,6 @@ from ffta.utils import dwavelet
 
 from numba import autojit
 
-
 class Pixel(object):
     """
     Signal Processing to Extract Time-to-First-Peak.
@@ -50,6 +49,10 @@ class Pixel(object):
         wavelet_parameter = int (default: 5)
         recombination = bool (0: Data are for Charging up, 1: Recombination)
         fit_phase = bool (0: fit to frequency, 1: fit to phase)
+    fit : bool
+        Whether to fit a function to find the minimum frequency
+    fit_init: list
+        A set of initial fit parameters to improve fitting pixel-to-pixel
 
     Attributes
     ----------
@@ -115,7 +118,7 @@ class Pixel(object):
 
     """
 
-    def __init__(self, signal_array, params, fit=True):
+    def __init__(self, signal_array, params, fit=True, fit_init=[]):
 
         # Create parameter attributes for optional parameters.
         # They will be overwritten by following for loop if they exist.
@@ -149,9 +152,15 @@ class Pixel(object):
         self.tfp = None
         self.shift = None
         self.cwt_matrix = None
+        self.popt = None
 
-        # Assign the fit parameter.
+        # Assign the fit parameters.
         self.fit = fit
+        self.fit_init = fit_init
+
+        # line seems to typecast this, want a list for fitting function
+        if type(fit_init) is np.ndarray:
+            self.fit_init = self.fit_init.tolist()
 
         return
 
@@ -210,13 +219,21 @@ class Pixel(object):
         self.signal *= sps.get_window(self.window, self.n_points)
 
         return
-        
+
     def dwt_denoise(self):
         """Uses DWT to denoise the signal prior to processing."""
-        
+
         rate = self.sampling_rate
-        lpf = self.drive_freq * 0.1
-        self.signal = dwavelet.dwt_denoise(self.signal,lpf,rate/2,rate)
+        lpf = self.drive_freq * 0.25
+        self.signal, self.coeffs, self.frequencies = dwavelet.dwt_denoise(self.signal,lpf,rate/2,rate)
+
+        # for debugging, coeffs -> 1D format
+        self.coeffs1D = np.array([])
+        for i in xrange(len(self.coeffs)):
+
+            self.coeffs1D = np.hstack( (self.coeffs1D, self.coeffs[i]) )
+
+        return
 
     def fir_filter(self):
         """Filters signal with a FIR bandpass filter."""
@@ -235,8 +252,8 @@ class Pixel(object):
                           window='blackman')
 
         self.signal = sps.fftconvolve(self.signal, taps, mode='same')
-        
-        # Shifts trigger due to causal nature of FIR filter        
+
+        # Shifts trigger due to causal nature of FIR filter
         self.tidx -= (self.n_taps - 1) / 2
 
         return
@@ -292,7 +309,7 @@ class Pixel(object):
 
             # Remove the fit from phase.
             self.phase -= (xfit[0] * np.arange(self.n_points)) + xfit[1]
-            
+
         return
 
     def calculate_inst_freq(self):
@@ -315,10 +332,8 @@ class Pixel(object):
     def calculate_amplitude(self):
         """Calculates the amplitude of the analytic signal. Uses pre-filter
         signal to do this."""
-        self.signal_orig = self.signal_array.mean(axis=1)
-        self.signal_orig = sps.hilbert(self.signal_orig)
-        self.amp = np.abs(self.signal_orig)
-        
+        self.amp = np.abs(self.signal)
+
         return
 
     def find_minimum(self):
@@ -365,20 +380,35 @@ class Pixel(object):
 
         t = np.arange(cut.shape[0]) / self.sampling_rate
 
-        # Fit the cut to the model.
-        popt = fitting.fit_bounded(self.Q, self.drive_freq, t, cut)
+        # Use previous fit and create bounds based on it
+        if self.fit_init:
 
-        A = popt[0]
-        tau1 = popt[1]
-        tau2 = popt[2]
+            A = self.fit_init[0]
+            tau1 = max(self.fit_init[1], 5e-7)
+            tau2 = max(self.fit_init[2], 1e-4)
+            self.constraint = [(10*A, 0.01*A),
+                               (tau1/10, tau1*10),
+                               (tau2/10, tau2*10)]
+        else:
+
+            self.constraint = []
+
+        # Fit the cut to the model.
+        popt = fitting.fit_bounded(self.Q,
+                                   self.drive_freq,
+                                   t,
+                                   cut,
+                                   init = self.fit_init,
+                                   constraint = self.constraint)
 
         # Analytical minimum of the fit.
+        A, tau1, tau2 = popt
         self.tfp = tau2 * np.log((tau1 + tau2) / tau2)
         self.shift = -A * np.exp(-self.tfp / tau1) * np.expm1(-self.tfp / tau2)
 
         # For diagnostic purposes.
-        self.cut = cut
         self.popt = popt
+        self.cut = cut
         self.best_fit = -A * np.exp(-t / tau1) * np.expm1(-t / tau2)
 
         return
@@ -565,13 +595,13 @@ class Pixel(object):
             if self.fit:
 
                 if self.phase_fitting:
-                    
+
                     self.fit_phase()
-                
+
                 else:
-                    
+
                     self.fit_freq()
-                
+
             else:
 
                 self.find_minimum()
@@ -590,8 +620,8 @@ class Pixel(object):
 
         if self.phase_fitting:
 
-            return self.tfp, self.shift, self.phase
-            
+            return self.tfp, self.shift, self.phase, self.popt
+
         else:
 
-            return self.tfp, self.shift, self.inst_freq
+            return self.tfp, self.shift, self.inst_freq, self.popt
