@@ -56,8 +56,9 @@ def main(argv=None):
                         choices=range(2, cpu_count + 1))
     parser.add_argument('-v', action='version',
                         version='FFtr-EFM 2.0 Release Candidate')
+    parser.add_argument('-f', action='store_true', default=False, help='toggles '
+                        'using sequential pixel fitting')
     args = parser.parse_args(argv)
-
 
     # Scan the path for .ibw and .cfg files.
     path = args.path
@@ -73,7 +74,7 @@ def main(argv=None):
     n_pixels, parameters = load.configuration(config_file)
 
     print 'Recombination: ', parameters['recombination']
-    if parameters.has_key('phase_fitting'):    
+    if parameters.has_key('phase_fitting'):
 
         print 'Phase fitting: ', parameters['phase_fitting']
 
@@ -116,10 +117,17 @@ def main(argv=None):
         for i, data_file in enumerate(data_files):
 
             signal_array = load.signal(data_file)
-            line_inst = line.Line(signal_array, parameters, n_pixels)
+
+            if not args.f:
+
+                line_inst = line.Line(signal_array, parameters, n_pixels)
+
+            else:
+
+                line_inst = line.Line(signal_array, parameters,
+                                      n_pixels, iterfit = True)
+
             tfp[i, :], shift[i, :], _ = line_inst.analyze()
-#            line_inst = line.Line(signal_array, parameters, n_pixels,fitphase=True)
-#            tfpphase[i, :], _, _ = line_inst.analyze()
 
             tfp_image = tfp_ax.imshow(tfp * 1e6, cmap='afmhot', **kwargs)
             shift_image = shift_ax.imshow(shift, cmap='cubehelix', **kwargs)

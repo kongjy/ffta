@@ -40,6 +40,8 @@ class Line(object):
         recombination = bool (0: FF-trEFMm, 1: Recombination)
     n_pixels : int
         Number of pixels in a line.
+    iter_fit: bool
+        Controls whether previous pixel's fit used in next pixel's fit
 
     Attributes
     ----------
@@ -75,7 +77,7 @@ class Line(object):
 
     """
 
-    def __init__(self, signal_array, params, n_pixels):
+    def __init__(self, signal_array, params, n_pixels, iterfit = False):
 
         # Pass inputs to the object.
         self.signal_array = signal_array
@@ -87,6 +89,9 @@ class Line(object):
         self.shift = np.empty(n_pixels)
         self.inst_freq = np.empty((signal_array.shape[0], n_pixels))
 
+        # Used to feed pixel values into next pixel's fit
+        self.iterfit = iterfit 
+        
         return
 
     def analyze(self):
@@ -112,7 +117,12 @@ class Line(object):
         for i, pixel_signal in enumerate(pixel_signals):
 
             p = pixel.Pixel(pixel_signal, self.params, fit_init=fit)
-            #(self.tfp[i], self.shift[i], self.inst_freq[:, i]) = p.analyze()
-            (self.tfp[i], self.shift[i], self.inst_freq[:, i], fit) = p.analyze()
+            if not self.iterfit:
+                
+                (self.tfp[i], self.shift[i], self.inst_freq[:, i], _) = p.analyze()    
+
+            else:                        
+
+                (self.tfp[i], self.shift[i], self.inst_freq[:, i], fit) = p.analyze()
 
         return (self.tfp, self.shift, self.inst_freq)
