@@ -36,7 +36,7 @@ def fit_bounded(Q, drive_freq, t, inst_freq, init = [], constraint = []):
 
             bnds = [(-10000, -1.0),
                     (5e-7, 0.1),
-                    (inv_beta/10, 0.1)]
+                    (1e-4, 0.1)]
 
         else:
             
