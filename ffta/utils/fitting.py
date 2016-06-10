@@ -59,22 +59,45 @@ def ddho_phase(t, A, tau1, tau2):
     return A * tau1 * np.exp(-t / tau1)*(-1 + prefactor*np.exp(-t/tau2)) + A*tau1*(1-prefactor)
     
 
-def fit_bounded_phase(Q, drive_freq, t, phase):
+def fit_bounded_phase(Q, drive_freq, t, phase, init = [], constraint = []):
 
         # Initial guess for relaxation constant.
         inv_beta = Q / (np.pi * drive_freq)
 
         # Cost function to minimize.
         cost = lambda p: np.sum((ddho_phase(t, *p) - phase) ** 2)
+            
+        # Passed in tau constraints
+        if not init:
 
-        # bounded optimization using scipy.minimize
-        pinit = [phase.max() - phase.min(), 1e-4, inv_beta]
+            pinit = [phase.max() - phase.min(), 1e-4, inv_beta]        
+
+        else:        
+
+            pinit = []
+            for p in init:
         
-        maxamp = phase[-1]/(1e-4*(1 - inv_beta/(inv_beta + 1e-4)))
+                pinit.append(p)
+                   
+        
+        # Passed in bounds
+        if not constraint:
+            
+            maxamp = phase[-1]/(1e-4*(1 - inv_beta/(inv_beta + 1e-4)))
+            bnds = [(0, 5*maxamp),
+                    (5e-7, 0.1),
+                    (1e-4, 0.1)]
+
+        else:
+            
+            bnds = []
+            for p in constraint:
+        
+                bnds.append(p)        
+        
+        
         
         popt, n_eval, rcode = fmin_tnc(cost, pinit, approx_grad=True,disp=0,
-                                       bounds=[(0,5*maxamp),
-                                               (5e-7, 0.1),
-                                               (1e-5, 0.1)])
+                                       bounds=bnds)
 
         return popt

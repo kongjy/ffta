@@ -376,19 +376,19 @@ class Pixel(object):
         if eidx.shape[0] > 0:
 
             eidx[:] += ridx/2
-  #          cut = cut[0:eidx[0]]
+            #cut = cut[0:eidx[0]]
 
         t = np.arange(cut.shape[0]) / self.sampling_rate
 
         # Use previous fit and create bounds based on it
         if self.fit_init:
 
-            A = self.fit_init[0]
-            tau1 = max(self.fit_init[1], 5e-7)
-            tau2 = max(self.fit_init[2], 1e-4)
-            self.constraint = [(10*A, 0.01*A),
-                               (tau1/10, tau1*10),
-                               (tau2/10, tau2*10)]
+            A, tau1, tau2 = self.fit_init
+            
+            self.constraint = [(A*2, A*0.3),
+                               (tau1*0.7, tau1*1.3),
+                               (tau2*0.7, tau2*1.3)]
+            
         else:
 
             self.constraint = []
@@ -401,8 +401,10 @@ class Pixel(object):
                                    init = self.fit_init,
                                    constraint = self.constraint)
 
+  
         # Analytical minimum of the fit.
         A, tau1, tau2 = popt
+        
         self.tfp = tau2 * np.log((tau1 + tau2) / tau2)
         self.shift = -A * np.exp(-self.tfp / tau1) * np.expm1(-self.tfp / tau2)
 
@@ -427,8 +429,26 @@ class Pixel(object):
         cut = -1*(self.phase[fidx:(fidx + ridx)] - self.phase[fidx])
         t = np.arange(cut.shape[0]) / self.sampling_rate
 
+
+        # Use previous fit and create bounds based on it
+        if self.fit_init:
+
+            A, tau1, tau2 = self.fit_init
+            self.constraint = [(0.7*A, 1.3*A),
+                               (tau1*0.7, tau1*1.3),
+                               (tau2*0.7, tau2*1.3)]
+            
+        else:
+
+            self.constraint = []
+
         # Fit the cut to the model.
-        popt = fitting.fit_bounded_phase(self.Q, self.drive_freq, t, cut)
+        popt = fitting.fit_bounded(self.Q,
+                                   self.drive_freq,
+                                   t,
+                                   cut,
+                                   init = self.fit_init,
+                                   constraint = self.constraint)
 
         A = popt[0]
         tau1 = popt[1]
@@ -481,12 +501,12 @@ class Pixel(object):
         """Generates the CWT using Morlet wavelet. Returns a 2D Matrix."""
 
         w0 = self.wavelet_parameter
-        wavelet_increment = 0.5  # Reducing this has little benefit.
+        wavelet_increment = .01 # Reducing this has little benefit.
 
         cwt_scale = ((w0 + np.sqrt(2 + w0 ** 2)) /
                      (4 * np.pi * self.drive_freq / self.sampling_rate))
 
-        widths = np.arange(cwt_scale * 0.9, cwt_scale * 1.1,
+        widths = np.arange(cwt_scale * 0.97, cwt_scale * 1.03,
                            wavelet_increment)
 
         cwt_matrix = cwavelet.cwt(self.signal, dt=1, scales=widths, p=w0)
@@ -507,9 +527,9 @@ class Pixel(object):
         for i in xrange(n_points):
 
             cut = self.cwt_matrix[:, i]
-            inst_freq[i], _ = parab.fit(cut, np.argmax(cut))
+            inst_freq[i] = np.argmax(cut)
 
-        inst_freq = (inst_freq * wavelet_increment + 0.9 * cwt_scale)
+        inst_freq = (inst_freq * wavelet_increment + 0.97 * cwt_scale)
         inst_freq = ((w0 + np.sqrt(2 + w0 ** 2)) /
                      (4 * np.pi * inst_freq[:] / self.sampling_rate))
 

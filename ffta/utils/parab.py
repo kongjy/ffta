@@ -2,6 +2,9 @@
 
 from numba import autojit
 
+from scipy import optimize as spo
+from scipy import interpolate as spi
+import numpy as np
 
 @autojit
 def fit(f, x):
@@ -36,3 +39,22 @@ def fit(f, x):
     yindex = C - B ** 2.0 / (4.0 * A)
 
     return xindex, yindex
+    
+    
+def fitdiff(f):
+    """
+    f = array
+
+    Uses spline minimization to get the peak
+    """
+    
+    # Define a spline to be used in finding minimum
+    # -f to use the minimize function
+    x = np.arange(f.shape[0])
+    func = spi.UnivariateSpline(x, -f, k=3, ext=3)
+
+    # Find the minimum of the spline using TNC method.
+    res = spo.minimize(func, f.argmax(),method='TNC')
+    idx = res.x[0]
+
+    return idx
