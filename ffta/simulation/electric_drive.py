@@ -163,7 +163,7 @@ class ElectricDrive(Cantilever):
                 
                 p = int(t * self.sampling_rate)
                 n_points = int(self.total_time * self.df)
-                _g = self.v_array[p] if p = n_points else self.v_array[-1]
+                _g = self.v_array[p] if p < n_points else self.v_array[-1]
                 
                 _g = (_g - self.scale[1]) / self.scale[0]
                 
@@ -244,7 +244,7 @@ class ElectricDrive(Cantilever):
             _g = self.v_array[p] if p < n_points else self.v_array[-1]
             
             driving_force = 0.5 * self.dCdz/self.mass * ((_g - self.v_cpd) \
-                                                         + self.v_ac * np.sin(self.wd * t))**2
+                                                         + self.v_ac * np.sin(self.wd * t)+_g)**2
         else: # single voltage step
         
             driving_force = 0.5 * self.dCdz/self.mass * ((self.dc_step(t, t0) - self.v_cpd) \
