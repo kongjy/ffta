@@ -1,209 +1,231 @@
 import matplotlib.animation as animation
 from matplotlib import pyplot as plt
 import pyUSID as usid
-import ffta
 from scipy import signal as sps
 import numpy as np
 
+'''
+Note: A 'str is not callable' bug is often due to not running set_mpeg
+
+'''
+
 
 def set_mpeg(path=None):
-    if not any(path):
-        plt.rcParams[
-            'animation.ffmpeg_path'] = r'C:\Users\Raj\Downloads\ffmpeg-20180124-1948b76-win64-static\bin\ffmpeg.exe'
+	if not any(path):
+		plt.rcParams[
+			'animation.ffmpeg_path'] = r'C:/Users/Raj/Downloads/ffmpeg/ffmpeg/bin/ffmpeg.exe'
 
-    return
+	else:
+		plt.rcParams['animation.ffmpeg_path'] = path
+	return
 
 
-def setup_movie(h5_ds, size=(10,6), vscale=[None, None]):
-    fig, ax = plt.subplots(nrows=1, figsize=size, facecolor='white')
+def setup_movie(h5_ds, size=(10, 6), vscale=[None, None], cmap='inferno'):
+	fig, ax = plt.subplots(nrows=1, figsize=size, facecolor='white')
 
-    if 'USID' not in str(type(h5_ds)):
-        h5_ds = usid.USIDataset(h5_ds)
+	if 'USID' not in str(type(h5_ds)):
+		h5_ds = usid.USIDataset(h5_ds)
 
-    params = usid.hdf_utils.get_attributes(h5_ds)
-    if 'trigger' not in params:
-        params = usid.hdf_utils.get_attributes(h5_ds.parent)
+	params = usid.hdf_utils.get_attributes(h5_ds)
+	if 'trigger' not in params:
+		params = usid.hdf_utils.get_attributes(h5_ds.parent)
 
-    ds = h5_ds.get_n_dim_form()[:, :, 0].T
+	ds = h5_ds.get_n_dim_form()[:, :, 0]
 
-    # set scale based on the first line, pre-trigger to post-trigger
-    tdx = params['trigger'] * params['sampling_rate'] / params['pnts_per_avg']
-    tdx = int(tdx * len(h5_ds[0, :]))
-    if any(vscale):
-        [vmin, vmax] = vscale
-    else:
-        vmin = np.min(h5_ds[0][int(tdx * 0.7): int(tdx * 1.3)])
-        vmax = np.max(h5_ds[0][int(tdx * 0.7): int(tdx * 1.3)])
+	# set scale based on the first line, pre-trigger to post-trigger
+	tdx = params['trigger'] * params['sampling_rate'] / params['pnts_per_avg']
+	tdx = int(tdx * len(h5_ds[0, :]))
+	if any(vscale):
+		[vmin, vmax] = vscale
+	else:
+		vmin = np.min(h5_ds[0][int(tdx * 0.7): int(tdx * 1.3)])
+		vmax = np.max(h5_ds[0][int(tdx * 0.7): int(tdx * 1.3)])
 
-    length = h5_ds.get_pos_values('X')
-    height = h5_ds.get_pos_values('Y')
+	length = h5_ds.get_pos_values('X')
+	height = h5_ds.get_pos_values('Y')
 
-    im0 = ax.imshow(ds, cmap='inferno_r', origin='lower',
-                    extent=[0, length[-1] * 1e6, 0, height[-1] * 1e6],
-                    vmin=vmin, vmax=vmax)
-    cbar = plt.colorbar(im0, ax=ax, orientation='vertical',
-                        fraction=0.023, pad=0.03, use_gridspec=True)
+	im0 = ax.imshow(ds, cmap=cmap, origin='lower',
+					extent=[0, length[-1] * 1e6, 0, height[-1] * 1e6],
+					vmin=vmin, vmax=vmax)
+	cbar = plt.colorbar(im0, ax=ax, orientation='vertical',
+						fraction=0.023, pad=0.03, use_gridspec=True)
 
-    return fig, ax, cbar, vmin, vmax
+	return fig, ax, cbar, vmin, vmax
 
 
 def create_freq_movie(h5_ds, filename='inst_freq', time_step=50,
-                      idx_start=500, idx_stop=100, smooth=None, size=(10,6),
-                      vscale=[None, None], interval=60, repeat_delay=100, crop=None):
-    '''
-    Creates an animation that goes through all the instantaneous frequency data.
-    
-    h5_ds : USID Dataset 
-        The instantaneous frequency data. NOT deflection, this is for post-processed data
-        
-    rotate : bool, optional
-        The data are saved in ndim_form in pycroscopy rotated 90 degrees
-        
-    time_step : int, optional
-        10 @ 10 MHz = 1 us
-        50 @ 10 MHz = 5 us
+					  idx_start=500, idx_stop=100, smooth=None, size=(10, 6),
+					  vscale=[None, None], cmap='inferno', interval=60, repeat_delay=100, crop=None):
+	'''
+	Creates an animation that goes through all the instantaneous frequency data.
+	
+	Parameters
+	----------
+	h5_ds : USID Dataset 
+		The instantaneous frequency data. NOT deflection, this is for post-processed data
 
-    idx_start : int
-        What index to start at. Typically to avoid the Hilbert Transform edge artifacts, you start a little ahead
+	rotate : bool, optional
+		The data are saved in ndim_form in pycroscopy rotated 90 degrees
 
-    idx_stop : int
-        Same as the above,in terms of how many points before the end to stop
+	time_step : int, optional
+		10 @ 10 MHz = 1 us
+		50 @ 10 MHz = 5 us
 
-    smooth : int, optional
-        Whether to apply a simple boxcar smoothing kernel to the data
+	idx_start : int
+		What index to start at. Typically to avoid the Hilbert Transform edge artifacts, you start a little ahead
 
-    size : tuple, optional
-        Figure size
+	idx_stop : int
+		Same as the above,in terms of how many points BEFORE the end to stop
 
-    vscale : list [float, float], optional
-        To hard-code the color scale, otherwise these are automatically generated
+	smooth : int, optional
+		Whether to apply a simple boxcar smoothing kernel to the data
 
-    crop : int
-        Crops the image to a certain line, in case part of the scan is bad
-    '''
+	size : tuple, optional
+		Figure size
 
-    if any(vscale):
-        fig, ax, cbar, _,_ = setup_movie(h5_ds, size, vscale)
-        [vmin, vmax] = vscale
-    else:
-        fig, ax, cbar, vmin, vmax = setup_movie(h5_ds, size)
+	vscale : list [float, float], optional
+		To hard-code the color scale, otherwise these are automatically generated
 
-    _orig = np.copy(h5_ds[()])
-    length = h5_ds.get_pos_values('X')
-    height = h5_ds.get_pos_values('Y')
-    if isinstance(crop, int):
-        height = height * crop / h5_ds.get_n_dim_form()[:, :, 0].T.shape[0]
+	crop : int
+		Crops the image to a certain line, in case part of the scan is bad
+	'''
 
-    params = usid.hdf_utils.get_attributes(h5_ds)
-    if 'trigger' not in params:
-        params = usid.hdf_utils.get_attributes(h5_ds.parent)
+	if not isinstance(h5_ds, usid.USIDataset):
+		h5_ds = usid.USIDataset(h5_ds)
 
-    if isinstance(smooth, int):
-        kernel = np.ones(smooth)/smooth
-        for i in np.arange(h5_ds.shape[0]):
-            h5_ds[i,:] = sps.fftconvolve(h5_ds[i,:], kernel, mode='same')
+	if any(vscale):
+		fig, ax, cbar, _, _ = setup_movie(h5_ds, size, vscale, cmap=cmap)
+		[vmin, vmax] = vscale
+	else:
+		fig, ax, cbar, vmin, vmax = setup_movie(h5_ds, size, cmap=cmap)
 
-    cbar.set_label('Frequency (Hz)', rotation=270, labelpad=20, fontsize=16)
+	_orig = np.copy(h5_ds[()])
+	length = h5_ds.get_pos_values('X')
+	height = h5_ds.get_pos_values('Y')
+	if isinstance(crop, int):
+		height = height * crop / h5_ds.get_n_dim_form()[:, :, 0].shape[0]
 
-    tx = h5_ds.get_spec_values('Time')
+	params = usid.hdf_utils.get_attributes(h5_ds)
+	if 'trigger' not in params:
+		params = usid.hdf_utils.get_attributes(h5_ds.parent)
 
-    # Loop through time segments
-    ims = []
-    for k, t in zip(np.arange(idx_start, len(tx) - idx_stop, time_step), tx[idx_start:-idx_stop:time_step]):
+	if isinstance(smooth, int):
+		kernel = np.ones(smooth) / smooth
+		for i in np.arange(h5_ds.shape[0]):
+			h5_ds[i, :] = sps.fftconvolve(h5_ds[i, :], kernel, mode='same')
 
-        _if = h5_ds.get_n_dim_form()[:, :, k].T
-        if isinstance(crop, int):
-            if crop < 0:
-                _if = _if[crop:, :]
-            else:
-                _if = _if[:crop, :]
+	cbar.set_label('Frequency (Hz)', rotation=270, labelpad=20, fontsize=16)
 
-        htitle = 'at ' + '{0:.4f}'.format(t * 1e3) + ' ms'
-        im0 = ax.imshow(_if, cmap='inferno_r', origin='lower', animated=True,
-                        extent=[0, length[-1] * 1e6, 0, height[-1] * 1e6],
-                        vmin=vmin, vmax=vmax)
+	tx = h5_ds.get_spec_values('Time')
 
-        if t > params['trigger']:
-            tl0 = ax.text(length[-1] * 1e6 / 2 - .35, height[-1] * 1e6 + .01,
-                          htitle + ' ms, TRIGGER', color='blue', weight='bold', fontsize=16)
-        else:
-            tl0 = ax.text(length[-1] * 1e6 / 2 - .35, height[-1] * 1e6 + .01,
-                          htitle + ' ms, PRE-TRIGGER', color='black', weight='regular', fontsize=14)
+	# Loop through time segments
+	ims = []
+	for k, t in zip(np.arange(idx_start, len(tx) - idx_stop, time_step),
+					tx[idx_start:-idx_stop:time_step]):
 
-        ims.append([im0, tl0])
+		_if = h5_ds.get_n_dim_form()[:, :, k]
+		if isinstance(crop, int):
+			if crop < 0:
+				_if = _if[crop:, :]
+			else:
+				_if = _if[:crop, :]
 
-    ani = animation.ArtistAnimation(fig, ims, interval=interval, repeat_delay=repeat_delay)
+		htitle = 'at ' + '{0:.4f}'.format(t * 1e3) + ' ms'
+		im0 = ax.imshow(_if, cmap=cmap, origin='lower', animated=True,
+						extent=[0, length[-1] * 1e6, 0, height[-1] * 1e6],
+						vmin=vmin, vmax=vmax)
 
-    ani.save(filename + '.mp4')
+		if t > params['trigger']:
+			tl0 = ax.text(length[-1] * 1e6 / 2 - .35, height[-1] * 1e6 + .01,
+						  htitle + ' ms, TRIGGER', color='blue', weight='bold', fontsize=16)
+		else:
+			tl0 = ax.text(length[-1] * 1e6 / 2 - .35, height[-1] * 1e6 + .01,
+						  htitle + ' ms, PRE-TRIGGER', color='black', weight='regular', fontsize=14)
 
-    # restore data
-    for i in np.arange(h5_ds.shape[0]):
-        h5_ds[i,:] = _orig[i,:]
+		ims.append([im0, tl0])
 
-    return
+	ani = animation.ArtistAnimation(fig, ims, interval=interval, repeat_delay=repeat_delay)
+
+	try:
+		ani.save(filename + '.mp4')
+	except TypeError as e:
+		print(e)
+		print('A "str is not callable" message is often due to not running set_mpeg function')
+
+	# restore data
+	for i in np.arange(h5_ds.shape[0]):
+		h5_ds[i, :] = _orig[i, :]
+
+	return
 
 
 def create_cpd_movie(h5_ds, filename='cpd', size=(10, 6),
-                     vscale=[None, None], smooth=None, interval=60, repeat_delay=100):
-    '''
+					 vscale=[None, None], cmap='inferno', smooth=None, interval=60, repeat_delay=100):
+	'''
 
-    :param h5_ds:
-    :param rotate:
-    :param filename:
-    :param size:
-    :param vscale:
-    :param interval:
-    :param repeat_delay:
-    :return:
-    '''
+	:param h5_ds:
+	:param rotate:
+	:param filename:
+	:param size:
+	:param vscale:
+	:param interval:
+	:param repeat_delay:
+	:return:
+	'''
 
-    if any(vscale):
-        fig, ax, cbar, _, _ = setup_movie(h5_ds, size)
-        [vmin, vmax] = vscale
-    else:
-        fig, ax, cbar, vmin, vmax = setup_movie(h5_ds, size)
+	if not isinstance(h5_ds, usid.USIDataset):
+		h5_ds = usid.USIDataset(h5_ds)
 
-    cbar.set_label('Potential (V)', rotation=270, labelpad=20, fontsize=16)
+	if any(vscale):
+		fig, ax, cbar, _, _ = setup_movie(h5_ds, size, vscale, cmap=cmap)
+		[vmin, vmax] = vscale
+	else:
+		fig, ax, cbar, vmin, vmax = setup_movie(h5_ds, size, cmap=cmap)
 
-    _orig = np.copy(h5_ds[()])
-    length = h5_ds.get_pos_values('X')
-    height = h5_ds.get_pos_values('Y')
-    params = usid.hdf_utils.get_attributes(h5_ds)
-    if 'trigger' not in params:
-        params = usid.hdf_utils.get_attributes(h5_ds.parent)
+	cbar.set_label('Potential (V)', rotation=270, labelpad=20, fontsize=16)
 
-    if isinstance(smooth, int):
-        kernel = np.ones(smooth) / smooth
-        for i in np.arange(h5_ds.shape[0]):
-            h5_ds[i, :] = sps.fftconvolve(h5_ds[i, :], kernel, mode='same')
+	_orig = np.copy(h5_ds[()])
+	length = h5_ds.get_pos_values('X')
+	height = h5_ds.get_pos_values('Y')
+	params = usid.hdf_utils.get_attributes(h5_ds)
+	if 'trigger' not in params:
+		params = usid.hdf_utils.get_attributes(h5_ds.parent)
 
-    tx = h5_ds.get_spec_values('Time')
+	if isinstance(smooth, int):
+		kernel = np.ones(smooth) / smooth
+		for i in np.arange(h5_ds.shape[0]):
+			h5_ds[i, :] = sps.fftconvolve(h5_ds[i, :], kernel, mode='same')
 
-    # Loop through time segments
-    ims = []
-    for k, t in zip(np.arange(len(tx)), tx):
+	tx = h5_ds.get_spec_values('Time')
 
-        _if = h5_ds.get_n_dim_form()[:, :, k].T
-        htitle = 'at ' + '{0:.4f}'.format(t * 1e3) + ' ms'
-        im0 = ax.imshow(_if, cmap='inferno_r', origin='lower', animated=True,
-                        extent=[0, length[-1] * 1e6, 0, height[-1] * 1e6],
-                        vmin=vmin, vmax=vmax)
+	# Loop through time segments
+	ims = []
+	for k, t in enumerate(tx):
 
-        if t > params['trigger']:
-            tl0 = ax.text(length[-1] * 1e6 / 2 - .35, height[-1] * 1e6 + .01,
-                          htitle + ' ms, TRIGGER', color='blue', weight='bold', fontsize=16)
-        else:
-            tl0 = ax.text(length[-1] * 1e6 / 2 - .35, height[-1] * 1e6 + .01,
-                          htitle + ' ms, PRE-TRIGGER', color='black', weight='regular', fontsize=14)
+		_if = h5_ds.get_n_dim_form()[:, :, k]
+		htitle = 'at ' + '{0:.4f}'.format(t * 1e3) + ' ms'
+		im0 = ax.imshow(_if, cmap=cmap, origin='lower', animated=True,
+						extent=[0, length[-1] * 1e6, 0, height[-1] * 1e6],
+						vmin=vmin, vmax=vmax)
 
-        ims.append([im0, tl0])
+		if t > params['trigger']:
+			tl0 = ax.text(length[-1] * 1e6 / 2 - .35, height[-1] * 1e6 + .01,
+						  htitle + ' ms, TRIGGER', color='blue', weight='bold', fontsize=16)
+		else:
+			tl0 = ax.text(length[-1] * 1e6 / 2 - .35, height[-1] * 1e6 + .01,
+						  htitle + ' ms, PRE-TRIGGER', color='black', weight='regular', fontsize=14)
 
-    ani = animation.ArtistAnimation(fig, ims, interval=interval, repeat_delay=repeat_delay)
+		ims.append([im0, tl0])
 
-    ani.save(filename + '.mp4')
+	ani = animation.ArtistAnimation(fig, ims, interval=interval, repeat_delay=repeat_delay)
 
-    # restore data
-    for i in np.arange(h5_ds.shape[0]):
-        h5_ds[i, :] = _orig[i, :]
+	try:
+		ani.save(filename + '.mp4')
+	except TypeError:
+		print('A "str is not callable" message is often due to not running set_mpeg function')
 
-    return
+	# restore data
+	for i in np.arange(h5_ds.shape[0]):
+		h5_ds[i, :] = _orig[i, :]
+
+	return
